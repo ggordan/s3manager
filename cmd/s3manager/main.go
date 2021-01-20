@@ -12,6 +12,7 @@ import (
 	"github.com/mastertinner/s3manager/internal/app/s3manager"
 	"github.com/matryer/way"
 	minio "github.com/minio/minio-go"
+	"github.com/minio/minio-go/pkg/credentials"
 )
 
 func main() {
@@ -19,31 +20,43 @@ func main() {
 	if !ok {
 		endpoint = "s3.amazonaws.com"
 	}
-	accessKeyID, ok := os.LookupEnv("ACCESS_KEY_ID")
-	if !ok {
-		log.Fatal("please provide ACCESS_KEY_ID")
-	}
-	secretAccessKey, ok := os.LookupEnv("SECRET_ACCESS_KEY")
-	if !ok {
-		log.Fatal("please provide SECRET_ACCESS_KEY")
-	}
-	useSSLEnvVar, ok := os.LookupEnv("USE_SSL")
-	if !ok {
-		useSSLEnvVar = "true"
-	}
-	useSSL := strings.ToLower(useSSLEnvVar) == "true"
 	port, ok := os.LookupEnv("PORT")
 	if !ok {
 		port = "8080"
 	}
 
-	tmplDir := filepath.Join("web", "template")
+	accessKeyID, _ := os.LookupEnv("ACCESS_KEY_ID")
+	secretAccessKey, _ := os.LookupEnv("SECRET_ACCESS_KEY")
+	useSSLEnvVar, ok := os.LookupEnv("USE_SSL")
+	if !ok {
+		useSSLEnvVar = "true"
+	}
+	useSSL := strings.ToLower(useSSLEnvVar) == "true"
 
 	// Set up S3 client
-	s3, err := minio.New(endpoint, accessKeyID, secretAccessKey, useSSL)
+	s3, err := minio.NewWithCredentials(endpoint, credentials.NewChainCredentials(
+		[]credentials.Provider{
+			&credentials.IAM{
+				Client: &http.Client{
+					Transport: http.DefaultTransport,
+				},
+			},
+			&credentials.EnvAWS{},
+			&credentials.Static{
+				Value: credentials.Value{
+					AccessKeyID:     accessKeyID,
+					SecretAccessKey: secretAccessKey,
+					SessionToken:    "",
+					SignerType:      credentials.SignatureDefault,
+				},
+			},
+		},
+	), useSSL, "")
 	if err != nil {
 		log.Fatalln(fmt.Errorf("error creating s3 client: %w", err))
 	}
+
+	tmplDir := filepath.Join("web", "template")
 
 	// Set up router
 	r := way.NewRouter()
